@@ -9,6 +9,9 @@ from datetime import datetime, timedelta
 import json
 
 
+# Libcord server ID
+LIBCORD_GUILD_ID = 221865504766164992
+
 def check_all(*predicates: Callable[[commands.Context], Any]):
     """
     Decorator that requires all provided predicates to be true.
@@ -24,46 +27,85 @@ def check_all(*predicates: Callable[[commands.Context], Any]):
     return commands.check(predicate)
 
 
+async def get_libcord_guild(ctx: commands.Context) -> Optional[discord.Guild]:
+    """
+    Gets the Libcord guild, works in both guild and DM contexts.
+    """
+    if ctx.guild and ctx.guild.id == LIBCORD_GUILD_ID:
+        return ctx.guild
+    
+    # If in DM or different guild, fetch Libcord guild
+    libcord_guild = ctx.bot.get_guild(LIBCORD_GUILD_ID)
+    return libcord_guild
+
+
 async def has_update_command_role(ctx: commands.Context) -> bool:
     """
-    Checks if the user has the update command role.
+    Checks if the user has the update command role in Libcord.
     """
-    if ctx.guild is None:
+    libcord_guild = await get_libcord_guild(ctx)
+    if libcord_guild is None:
         return False
-    uc_role = discord.utils.get(ctx.guild.roles, name="Update Command")
-    jc_role = discord.utils.get(ctx.guild.roles, name="Junior Command")
+    
+    # Get the member in Libcord guild
+    member = libcord_guild.get_member(ctx.author.id)
+    if member is None:
+        return False
+    
+    uc_role = discord.utils.get(libcord_guild.roles, name="Update Command")
+    jc_role = discord.utils.get(libcord_guild.roles, name="Junior Command")
     if uc_role is None:
         return False
-    return (uc_role in ctx.author.roles) or (jc_role in ctx.author.roles) or (ctx.author.id == 300681028920541199)
+    return (uc_role in member.roles) or (jc_role in member.roles) or (ctx.author.id == 300681028920541199)
 
 
 async def has_liberator_role(ctx: commands.Context) -> bool:
     """
-    Checks if the user has the update command role.
+    Checks if the user has the Liberator role in Libcord.
     """
-    if ctx.guild is None:
+    libcord_guild = await get_libcord_guild(ctx)
+    if libcord_guild is None:
         return False
-    liberator_role = discord.utils.get(ctx.guild.roles, name="Liberator")
-    return liberator_role in ctx.author.roles
+    
+    # Get the member in Libcord guild
+    member = libcord_guild.get_member(ctx.author.id)
+    if member is None:
+        return False
+    
+    liberator_role = discord.utils.get(libcord_guild.roles, name="Liberator")
+    return liberator_role in member.roles
 
 
 async def has_updating_role(ctx: commands.Context) -> bool:
     """
-    Checks if the user does not have the Updating role.
+    Checks if the user has the Updating role in Libcord.
     """
-    if ctx.guild is None:
+    libcord_guild = await get_libcord_guild(ctx)
+    if libcord_guild is None:
         return False
-    updating_role = discord.utils.get(ctx.guild.roles, name="Updating")
-    return updating_role in ctx.author.roles
+    
+    # Get the member in Libcord guild
+    member = libcord_guild.get_member(ctx.author.id)
+    if member is None:
+        return False
+    
+    updating_role = discord.utils.get(libcord_guild.roles, name="Updating")
+    return updating_role in member.roles
 
 
 async def is_update_planning_channel(ctx: commands.Context) -> bool:
     """
-    Checks if the command is being used in the Update Planning channel.
+    Checks if the command is being used in the Update Planning channel in Libcord.
     """
-    if ctx.guild is None:
+    libcord_guild = await get_libcord_guild(ctx)
+    if libcord_guild is None:
         return False
-    update_planning_channel = discord.utils.get(ctx.guild.channels, name="update-planning")
+    
+    # Allow DMs to bypass this check
+    if isinstance(ctx.channel, discord.DMChannel):
+        return True
+    
+    update_planning_channel = discord.utils.get(libcord_guild.channels, name="update-planning")
     return ctx.channel == update_planning_channel
 
 
@@ -142,7 +184,6 @@ class Whipping(commands.Cog):
         return assignments
 
     @commands.group(name="whip")
-    @commands.guild_only()
     @commands.check(has_update_command_role)
     async def whip_group(self, ctx: commands.Context):
         """Whipping management commands"""
@@ -153,7 +194,10 @@ class Whipping(commands.Cog):
     @commands.is_owner()
     async def setup_assignments(self, ctx: commands.Context, stripe_count: int = 3):
         """Set up initial user assignments with RAID-like striping"""
-        guild = ctx.guild
+        guild = await get_libcord_guild(ctx)
+        if guild is None:
+            await ctx.send("❌ Cannot access Libcord server!")
+            return
         await self.config.guild(guild).stripe_count.set(stripe_count)
 
         # Get all UC members
@@ -190,7 +234,10 @@ class Whipping(commands.Cog):
     @commands.check(has_update_command_role)
     async def zen_mode(self, ctx: commands.Context, limit: Optional[int] = None):
         """Get list of users to message for establishing DM connections"""
-        guild = ctx.guild
+        guild = await get_libcord_guild(ctx)
+        if guild is None:
+            await ctx.send("❌ Cannot access Libcord server!")
+            return
         user_id = str(ctx.author.id)
 
         assignments = await self.config.guild(guild).assignments()
@@ -240,7 +287,10 @@ class Whipping(commands.Cog):
     @commands.check(has_update_command_role)
     async def whipping_mode(self, ctx: commands.Context, online_only: bool = True):
         """Start whipping mode for an update"""
-        guild = ctx.guild
+        guild = await get_libcord_guild(ctx)
+        if guild is None:
+            await ctx.send("❌ Cannot access Libcord server!")
+            return
         user_id = str(ctx.author.id)
 
         assignments = await self.config.guild(guild).assignments()
@@ -291,7 +341,10 @@ class Whipping(commands.Cog):
     @commands.check(has_update_command_role)
     async def mark_progress(self, ctx: commands.Context, user: discord.Member):
         """Mark a user as messaged in zen mode"""
-        guild = ctx.guild
+        guild = await get_libcord_guild(ctx)
+        if guild is None:
+            await ctx.send("❌ Cannot access Libcord server!")
+            return
         uc_id = str(ctx.author.id)
         user_id = str(user.id)
 
@@ -309,7 +362,10 @@ class Whipping(commands.Cog):
     @commands.check(has_update_command_role)
     async def mark_whip_done(self, ctx: commands.Context, user: discord.Member):
         """Mark a user as messaged during the current update"""
-        guild = ctx.guild
+        guild = await get_libcord_guild(ctx)
+        if guild is None:
+            await ctx.send("❌ Cannot access Libcord server!")
+            return
         uc_id = str(ctx.author.id)
         user_id = str(user.id)
 
@@ -329,7 +385,10 @@ class Whipping(commands.Cog):
     @commands.check(has_update_command_role)
     async def my_stats(self, ctx: commands.Context):
         """View your assignment statistics"""
-        guild = ctx.guild
+        guild = await get_libcord_guild(ctx)
+        if guild is None:
+            await ctx.send("❌ Cannot access Libcord server!")
+            return
         user_id = str(ctx.author.id)
 
         assignments = await self.config.guild(guild).assignments()
@@ -361,7 +420,10 @@ class Whipping(commands.Cog):
     @commands.is_owner()
     async def manage_templates(self, ctx: commands.Context, template_type: str = None, *, new_template: str = None):
         """View or update message templates"""
-        guild = ctx.guild
+        guild = await get_libcord_guild(ctx)
+        if guild is None:
+            await ctx.send("❌ Cannot access Libcord server!")
+            return
 
         if template_type is None:
             # Show current templates
@@ -391,7 +453,10 @@ class Whipping(commands.Cog):
     @commands.check(has_update_command_role)
     async def update_report(self, ctx: commands.Context):
         """View report for the current update"""
-        guild = ctx.guild
+        guild = await get_libcord_guild(ctx)
+        if guild is None:
+            await ctx.send("❌ Cannot access Libcord server!")
+            return
 
         update_progress = await self.config.guild(guild).update_progress()
 
@@ -435,6 +500,9 @@ class Whipping(commands.Cog):
             return
 
         guild = member.guild
+        # Only process members joining Libcord
+        if guild.id != LIBCORD_GUILD_ID:
+            return
         assignments = await self.config.guild(guild).assignments()
         stripe_count = await self.config.guild(guild).stripe_count()
 
@@ -476,7 +544,10 @@ class Whipping(commands.Cog):
     @commands.check(has_update_command_role)
     async def view_assignments(self, ctx: commands.Context, member: Optional[discord.Member] = None):
         """View user assignments"""
-        guild = ctx.guild
+        guild = await get_libcord_guild(ctx)
+        if guild is None:
+            await ctx.send("❌ Cannot access Libcord server!")
+            return
         assignments = await self.config.guild(guild).assignments()
 
         if member:
@@ -528,7 +599,10 @@ class Whipping(commands.Cog):
     async def reassign_user(self, ctx: commands.Context, user: discord.Member, from_uc: discord.Member,
                             to_uc: discord.Member):
         """Reassign a user from one UC member to another"""
-        guild = ctx.guild
+        guild = await get_libcord_guild(ctx)
+        if guild is None:
+            await ctx.send("❌ Cannot access Libcord server!")
+            return
         assignments = await self.config.guild(guild).assignments()
         progress = await self.config.guild(guild).progress()
 
@@ -565,7 +639,10 @@ class Whipping(commands.Cog):
     @commands.check(has_update_command_role)
     async def who_is_assigned(self, ctx: commands.Context, user: discord.Member):
         """Find which Update Command members a user is assigned to"""
-        guild = ctx.guild
+        guild = await get_libcord_guild(ctx)
+        if guild is None:
+            await ctx.send("❌ Cannot access Libcord server!")
+            return
         assignments = await self.config.guild(guild).assignments()
         progress = await self.config.guild(guild).progress()
         
@@ -613,7 +690,10 @@ class Whipping(commands.Cog):
     @commands.check(has_update_command_role)
     async def zen_mode_silent(self, ctx: commands.Context, limit: Optional[int] = None):
         """Get list of users to message with @silent prefix for minimal disruption"""
-        guild = ctx.guild
+        guild = await get_libcord_guild(ctx)
+        if guild is None:
+            await ctx.send("❌ Cannot access Libcord server!")
+            return
         user_id = str(ctx.author.id)
 
         assignments = await self.config.guild(guild).assignments()
@@ -666,7 +746,10 @@ class Whipping(commands.Cog):
     @commands.is_owner()
     async def check_invalid_assignments(self, ctx: commands.Context, fix: bool = False):
         """Check for UC/JC members who no longer have their roles and optionally fix assignments"""
-        guild = ctx.guild
+        guild = await get_libcord_guild(ctx)
+        if guild is None:
+            await ctx.send("❌ Cannot access Libcord server!")
+            return
         assignments = await self.config.guild(guild).assignments()
         progress = await self.config.guild(guild).progress()
         stripe_count = await self.config.guild(guild).stripe_count()
