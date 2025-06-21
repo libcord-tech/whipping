@@ -661,3 +661,149 @@ class Whipping(commands.Cog):
         embed.set_footer(text="Use [p]whip progress <@user> to mark as complete")
 
         await ctx.send(embed=embed)
+    
+    @whip_group.command(name="check_invalid")
+    @commands.is_owner()
+    async def check_invalid_assignments(self, ctx: commands.Context, fix: bool = False):
+        """Check for UC/JC members who no longer have their roles and optionally fix assignments"""
+        guild = ctx.guild
+        assignments = await self.config.guild(guild).assignments()
+        progress = await self.config.guild(guild).progress()
+        stripe_count = await self.config.guild(guild).stripe_count()
+        
+        # Get UC and JC roles
+        uc_role = discord.utils.get(guild.roles, name="Update Command")
+        jc_role = discord.utils.get(guild.roles, name="Junior Command")
+        
+        if not uc_role:
+            await ctx.send("Update Command role not found!")
+            return
+        
+        # Find all UC/JC members who have assignments but no longer have the role
+        invalid_uc_members = []
+        valid_uc_members = []
+        
+        for uc_id_str in assignments.keys():
+            member = guild.get_member(int(uc_id_str))
+            if member:
+                has_uc_role = uc_role in member.roles
+                has_jc_role = jc_role and jc_role in member.roles
+                
+                if has_uc_role or has_jc_role:
+                    valid_uc_members.append(int(uc_id_str))
+                else:
+                    invalid_uc_members.append((uc_id_str, member, len(assignments[uc_id_str])))
+            else:
+                # Member no longer in guild
+                invalid_uc_members.append((uc_id_str, None, len(assignments[uc_id_str])))
+        
+        if not invalid_uc_members:
+            await ctx.send("✅ All assignments are valid! No UC/JC members without roles found.")
+            return
+        
+        # Create report embed
+        embed = discord.Embed(
+            title="🚨 Invalid UC/JC Assignments Found",
+            description=f"Found **{len(invalid_uc_members)}** UC/JC members without proper roles",
+            color=discord.Color.red()
+        )
+        
+        # List invalid members
+        invalid_list = []
+        total_users_affected = 0
+        for uc_id_str, member, user_count in invalid_uc_members:
+            if member:
+                invalid_list.append(f"• {member.mention} ({member.name}): {user_count} users")
+            else:
+                invalid_list.append(f"• Unknown (ID: {uc_id_str}): {user_count} users")
+            total_users_affected += user_count
+        
+        embed.add_field(
+            name="Invalid UC/JC Members",
+            value="\n".join(invalid_list),
+            inline=False
+        )
+        
+        embed.add_field(
+            name="Total Users Affected",
+            value=str(total_users_affected),
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Valid UC/JC Members",
+            value=str(len(valid_uc_members)),
+            inline=True
+        )
+        
+        if not fix:
+            embed.set_footer(text="Run with fix=True to redistribute affected users")
+            await ctx.send(embed=embed)
+            return
+        
+        # Fix assignments if requested
+        if not valid_uc_members:
+            await ctx.send("❌ Cannot fix assignments: No valid UC/JC members found!")
+            return
+        
+        # Collect all users that need reassignment
+        users_to_reassign = []
+        for uc_id_str, _, _ in invalid_uc_members:
+            users_to_reassign.extend(assignments[uc_id_str])
+            # Remove invalid UC member from assignments
+            del assignments[uc_id_str]
+            # Remove from progress tracking
+            if uc_id_str in progress:
+                del progress[uc_id_str]
+        
+        # Remove duplicates
+        users_to_reassign = list(set(users_to_reassign))
+        
+        # Redistribute users using the striping algorithm
+        new_assignments = self._stripe_users(valid_uc_members, users_to_reassign, stripe_count)
+        
+        # Merge new assignments with existing ones
+        for uc_id, user_list in new_assignments.items():
+            uc_id_str = str(uc_id)
+            if uc_id_str not in assignments:
+                assignments[uc_id_str] = []
+            
+            for user_id in user_list:
+                if user_id not in assignments[uc_id_str]:
+                    assignments[uc_id_str].append(user_id)
+                    
+                    # Initialize progress for new assignment
+                    if uc_id_str not in progress:
+                        progress[uc_id_str] = {}
+                    progress[uc_id_str][str(user_id)] = False
+        
+        # Save updated assignments and progress
+        await self.config.guild(guild).assignments.set(assignments)
+        await self.config.guild(guild).progress.set(progress)
+        
+        # Create success embed
+        success_embed = discord.Embed(
+            title="✅ Assignments Fixed",
+            description=f"Successfully redistributed **{len(users_to_reassign)}** users",
+            color=discord.Color.green()
+        )
+        
+        success_embed.add_field(
+            name="Removed UC/JC Members",
+            value=str(len(invalid_uc_members)),
+            inline=True
+        )
+        
+        success_embed.add_field(
+            name="Users Redistributed",
+            value=str(len(users_to_reassign)),
+            inline=True
+        )
+        
+        success_embed.add_field(
+            name="Active UC/JC Members",
+            value=str(len(valid_uc_members)),
+            inline=True
+        )
+        
+        await ctx.send(embed=success_embed)
