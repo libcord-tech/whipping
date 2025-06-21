@@ -1,0 +1,18 @@
+{
+  "author": [
+    "Haku"
+  ],
+  "name": "Whipping",
+  "bot_version": [
+    3,
+    0,
+    0
+  ],
+  "description": "Libcord DM whipping",
+  "hidden": false,
+  "install_msg": "Whipping successfully installed.",
+  "short": "Libcord DM whipping",
+  "tags": [
+    "fun"
+  ]
+}
