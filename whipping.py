@@ -561,6 +561,54 @@ class Whipping(commands.Cog):
 
         await ctx.send(f"✅ Reassigned {user.mention} from {from_uc.mention} to {to_uc.mention}")
 
+    @whip_group.command(name="whois")
+    @commands.check(has_update_command_role)
+    async def who_is_assigned(self, ctx: commands.Context, user: discord.Member):
+        """Find which Update Command members a user is assigned to"""
+        guild = ctx.guild
+        assignments = await self.config.guild(guild).assignments()
+        progress = await self.config.guild(guild).progress()
+        
+        # Find all UC members assigned to this user
+        assigned_uc_members = []
+        user_id = user.id
+        
+        for uc_id_str, assigned_users in assignments.items():
+            if user_id in assigned_users:
+                uc_member = guild.get_member(int(uc_id_str))
+                if uc_member:
+                    # Check if this UC member has messaged the user in zen mode
+                    has_messaged = progress.get(uc_id_str, {}).get(str(user_id), False)
+                    assigned_uc_members.append((uc_member, has_messaged))
+        
+        if not assigned_uc_members:
+            await ctx.send(f"{user.mention} is not assigned to any Update Command members.")
+            return
+        
+        embed = discord.Embed(
+            title=f"🔍 UC Members Assigned to {user.name}",
+            description=f"{user.mention} is assigned to **{len(assigned_uc_members)}** UC members:",
+            color=discord.Color.blue()
+        )
+        
+        # Sort by name for consistent display
+        assigned_uc_members.sort(key=lambda x: x[0].name.lower())
+        
+        uc_list = []
+        for uc_member, has_messaged in assigned_uc_members:
+            status = "✅" if has_messaged else "❌"
+            uc_list.append(f"{status} {uc_member.mention} ({uc_member.name})")
+        
+        embed.add_field(
+            name="Assigned UC Members",
+            value="\n".join(uc_list),
+            inline=False
+        )
+        
+        embed.set_footer(text="✅ = Already messaged in zen mode | ❌ = Not yet messaged")
+        
+        await ctx.send(embed=embed)
+    
     @whip_group.command(name="zensilent")
     @commands.check(has_update_command_role)
     async def zen_mode_silent(self, ctx: commands.Context, limit: Optional[int] = None):
